@@ -2,3 +2,5 @@ node_modules
 .env
 *.csv
 *.mp3
+!silence.mp3
+!timer.mp3

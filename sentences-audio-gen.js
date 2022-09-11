@@ -8,7 +8,9 @@ import minimist from 'minimist';
 import fetch from 'node-fetch';
 import md5 from 'md5';
 import csv from 'csv-parser';
+import audioconcat from 'audioconcat';
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
+import { resolve } from 'path';
 
 const CSV_HEADERS = ['enSentence', 'esSentence', 'audioFileHash', 'voiceId'];
 const CSV_SEPARATOR = ';';
@@ -118,6 +120,35 @@ async function processSentences(sentences = [], { forceVoiceId, folderName } = {
   return translatedSentences;
 }
 
+async function combineAudios(sentences = [], name) {
+  const filename = `${name}_combined.mp3`;
+  if(fs.existsSync(filename)) return;
+  console.log("Generating combined audio...")
+  const fileList = [];
+  sentences.forEach(s => {
+    fileList.push(`${name}/es/` + s.audioFileHash + '.mp3');
+    fileList.push('resources/timer.mp3');
+    fileList.push(`${name}/en/` + s.audioFileHash + '.mp3');
+    fileList.push('resources/silence.mp3');
+  });
+  return new Promise(async (resolve, reject) => {
+    audioconcat(fileList)
+      .concat(filename)
+      .on('start', function (command) {
+        console.log('ffmpeg process started:', command)
+      })
+      .on('error', function (err, stdout, stderr) {
+        console.error('❌ Error:', err)
+        console.error('ffmpeg stderr:', stderr)
+        return reject(err);
+      })
+      .on('end', function (output) {
+        console.error('✅ Audio created in:', output)
+        return resolve();
+      });
+  });
+}
+
 async function main() {
   let sentences;
   const argv = minimist(process.argv.slice(2));
@@ -129,7 +160,7 @@ async function main() {
     process.exit(0);
   }
   if(argv.help || argv.h) {
-    console.log('./sentences-audio-gen filename.csv --force-voice-id Matthew');
+    console.log('./sentences-audio-gen filename.csv --force-voice-id Matthew --concat');
     console.log('Available voices: Matthew, Joanna, Amy, Brian');
     process.exit(0);
   }
@@ -140,6 +171,9 @@ async function main() {
       console.log(`✅ It's been read ${sentences.length} sentences`);
       sentences = await processSentences(sentences, { folderName, forceVoiceId: argv['force-voice-id'] });
       await writeCsv(sentences, filename);
+      if (argv.concat) {
+        await combineAudios(sentences, folderName);
+      }
     } catch(err) {
       console.log(`❌ ${err.message}`);
       process.exit(1);
