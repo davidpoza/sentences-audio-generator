@@ -11,7 +11,7 @@ import csv from 'csv-parser';
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 
 const CSV_HEADERS = ['enSentence', 'esSentence', 'audioFileHash', 'voiceId'];
-const CSV_SEPARATOR = ',';
+const CSV_SEPARATOR = ';';
 const DEFAULT_VOICE_ID = 'Joanna';
 dotenv.config();
 const pipelinePromise = promisify(pipeline);
@@ -32,6 +32,8 @@ async function translateText(text, targetLang = 'ES') {
 }
 
 async function generateAudioFile(text, { folderName, filename, voiceId = DEFAULT_VOICE_ID, lang = 'es-ES' }) {
+  const path = `${folderName}/${filename}.mp3`;
+  if(fs.existsSync(path)) return;
   console.log("💲Generating audio:", text, filename);
 
   const client = new PollyClient({
@@ -47,9 +49,9 @@ async function generateAudioFile(text, { folderName, filename, voiceId = DEFAULT
   }));
 
   if (data.AudioStream) {
-    console.log('✅ Success request. Saving file', `${folderName}/${filename}.mp3`);
+    console.log('✅ Success request. Saving file', path);
     await fs.promises.mkdir(folderName, { recursive: true });
-    data.AudioStream.pipe(fs.createWriteStream(`${folderName}/${filename}.mp3`));
+    data.AudioStream.pipe(fs.createWriteStream(path));
     await delay(1000);
   }
 }
@@ -84,8 +86,8 @@ async function parseCsv(filename, { forceVoiceId  } = {}) {
 
 async function writeCsv(sentences = [], filename) {
   const data = sentences.reduce((prev, curr) => {
-    return `${prev}\n${curr.enSentence}${CSV_SEPARATOR}${curr.esSentence || ''}${CSV_SEPARATOR}${curr.audioFileHash || ''}${CSV_SEPARATOR}${curr.voiceId || ''}`;
-  }, `${CSV_HEADERS.join(CSV_SEPARATOR)}\n`);
+    return `${prev}\n"${curr.enSentence}"${CSV_SEPARATOR}"${curr.esSentence || ''}"${CSV_SEPARATOR}"${curr.audioFileHash || ''}"${CSV_SEPARATOR}"${curr.voiceId || ''}"`;
+  }, `${CSV_HEADERS.join(CSV_SEPARATOR)}`);
   fs.writeFileSync(filename, data);
 }
 
@@ -136,15 +138,13 @@ async function main() {
     try {
       sentences = await parseCsv(filename);
       console.log(`✅ It's been read ${sentences.length} sentences`);
-
       sentences = await processSentences(sentences, { folderName });
-
-      await writeCsv(sentences, 'prueba.csv');
+      await writeCsv(sentences, filename);
     } catch(err) {
       console.log(`❌ ${err.message}`);
       process.exit(1);
     }
-     console.log(sentences[0]);
+
      process.exit(0);
   }
 
