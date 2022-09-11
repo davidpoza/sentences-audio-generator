@@ -9,18 +9,29 @@ import fetch from 'node-fetch';
 import md5 from 'md5';
 import csv from 'csv-parser';
 
-const CSV_HEADERS = ['enSentence', 'esSentence', 'voiceId'];
+const CSV_HEADERS = ['enSentence', 'esSentence', 'audioFileHash', 'voiceId'];
+const CSV_SEPARATOR = ',';
 const DEFAULT_VOICE_ID = 'Joanna';
 
 dotenv.config();
 const pipelinePromise = promisify(pipeline);
 
-function translate(text, targetLang = 'es') {
-
+async function translateText(text, targetLang = 'ES') {
+  console.log("💲Translating text:", text);
+  const req = await fetch('https://api-free.deepl.com/v2/translate', {
+    method: 'post',
+    headers: {
+      Authorization: `DeepL-Auth-Key ${process.env.DEEPL_TOKEN}`,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: `text=${encodeURIComponent(text)}&target_lang=${targetLang}`
+  });
+  const data = await req.json();
+  return data?.translations?.[0]?.text;
 }
 
-function generateAudioFile(text, folder, filename, voiceId) {
-
+async function generateAudioFile(text, { folderName, filename, forceVoiceId })  {
+  console.log("💲Generating audio:", text, filename);
 }
 
 /**
@@ -32,7 +43,7 @@ function generateAudioFile(text, folder, filename, voiceId) {
 async function parseCsv(filename, { forceVoiceId  } = {}) {
   const results = [];
   try {
-    await pipelinePromise(fs.createReadStream(filename), csv(CSV_HEADERS), (stream) => {
+    await pipelinePromise(fs.createReadStream(filename), csv({ separator: CSV_SEPARATOR }), (stream) => {
       stream.on('data', (data) => {
         const enSentence = data.enSentence || data[0];
         const esSentence = data.esSentence || data[1];
@@ -40,7 +51,7 @@ async function parseCsv(filename, { forceVoiceId  } = {}) {
         results.push({
           enSentence,
           esSentence,
-          voiceId
+          voiceId,
         });
       });
       return Promise.resolve(results);
@@ -51,15 +62,35 @@ async function parseCsv(filename, { forceVoiceId  } = {}) {
   return results;
 }
 
+async function writeCsv(sentences = [], filename) {
+  const data = sentences.reduce((prev, curr) => {
+    return `${prev}\n${curr.enSentence}${CSV_SEPARATOR}${curr.esSentence || ''}${CSV_SEPARATOR}${curr.audioFileHash || ''}${CSV_SEPARATOR}${curr.voiceId || ''}`;
+  }, `${CSV_HEADERS.join(CSV_SEPARATOR)}\n`);
+  fs.writeFileSync(filename, data);
+}
 
-function processSentences(sentences = [], { forceVoiceId } = {}) {
 
+async function processSentences(sentences = [], { forceVoiceId, folderName } = {}) {
+  const translatedSentences = await Promise.all(sentences.map(async s => {
+    return {
+      enSentence: s.enSentence,
+      esSentence: s.esSentence || await translateText(s.enSentence),
+      voiceId: s.voiceId,
+      audioFileHash: md5(s.enSentence),
+    };
+  }));
+  // for (const s of translatedSentences) {
+  //   await generateAudioFile(s.enSentence, { filename: s.audioFileHash, forceVoiceId, folderName });
+  //   await generateAudioFile(s.esSentence, { filename: s.audioFileHash, forceVoiceId, folderName });
+  // }
+  return translatedSentences;
 }
 
 async function main() {
   let sentences;
   const argv = minimist(process.argv.slice(2));
   const filename = argv['_'][0];
+  const folderName = filename.includes('.') ? filename?.split('.')?.[0] : filename;
 
   if(!filename && !argv.help && !argv.h) {
     console.log('run ./sentences-audio-gen --help');
@@ -74,11 +105,15 @@ async function main() {
   if(filename) {
     try {
       sentences = await parseCsv(filename);
-      console.log(`It's been read ${sentences.length} sentences`);
+      console.log(`✅ It's been read ${sentences.length} sentences`);
+
+      sentences = await processSentences(sentences, { folderName });
+
+      await writeCsv(sentences, 'prueba.csv');
     } catch(err) {
-      console.log(err.message);
+      console.log(`❌ ${err.message}`);
     }
-    // console.log(sentences )
+     console.log(sentences[0]);
   }
 
 }
