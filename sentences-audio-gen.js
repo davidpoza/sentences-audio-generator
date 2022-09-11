@@ -3,18 +3,19 @@
 import fs from 'fs';
 import { promisify } from 'util';
 import dotenv from 'dotenv';
-import { pipeline, Readable } from 'stream';
+import { pipeline } from 'stream';
 import minimist from 'minimist';
 import fetch from 'node-fetch';
 import md5 from 'md5';
 import csv from 'csv-parser';
+import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 
 const CSV_HEADERS = ['enSentence', 'esSentence', 'audioFileHash', 'voiceId'];
 const CSV_SEPARATOR = ',';
 const DEFAULT_VOICE_ID = 'Joanna';
-
 dotenv.config();
 const pipelinePromise = promisify(pipeline);
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function translateText(text, targetLang = 'ES') {
   console.log("💲Translating text:", text);
@@ -30,8 +31,27 @@ async function translateText(text, targetLang = 'ES') {
   return data?.translations?.[0]?.text;
 }
 
-async function generateAudioFile(text, { folderName, filename, forceVoiceId })  {
+async function generateAudioFile(text, { folderName, filename, voiceId = DEFAULT_VOICE_ID, lang = 'es-ES' }) {
   console.log("💲Generating audio:", text, filename);
+
+  const client = new PollyClient({
+    region: "eu-west-2",
+  });
+  const data = await client.send(new SynthesizeSpeechCommand({
+    OutputFormat: 'mp3',
+    Engine: 'neural',
+    Text: text,
+    TextType: 'text',
+    VoiceId: voiceId,
+    LanguageCode: lang,
+  }));
+
+  if (data.AudioStream) {
+    console.log('✅ Success request. Saving file', `${folderName}/${filename}.mp3`);
+    await fs.promises.mkdir(folderName, { recursive: true });
+    data.AudioStream.pipe(fs.createWriteStream(`${folderName}/${filename}.mp3`));
+    await delay(1000);
+  }
 }
 
 /**
@@ -79,10 +99,20 @@ async function processSentences(sentences = [], { forceVoiceId, folderName } = {
       audioFileHash: md5(s.enSentence),
     };
   }));
-  // for (const s of translatedSentences) {
-  //   await generateAudioFile(s.enSentence, { filename: s.audioFileHash, forceVoiceId, folderName });
-  //   await generateAudioFile(s.esSentence, { filename: s.audioFileHash, forceVoiceId, folderName });
-  // }
+  for (const s of translatedSentences) {
+    await generateAudioFile(s.enSentence, {
+      filename: s.audioFileHash,
+      voiceId: forceVoiceId,
+      folderName: folderName + "/en",
+      lang: "en-US",
+    });
+    await generateAudioFile(s.esSentence, {
+      filename: s.audioFileHash,
+      voiceId: 'Lucia',
+      folderName: folderName + "/es",
+      lang: "es-ES",
+    });
+  }
   return translatedSentences;
 }
 
@@ -97,7 +127,7 @@ async function main() {
     process.exit(0);
   }
   if(argv.help || argv.h) {
-    console.log('./sentences-audio-gen filename.csv -voiceId Matthew');
+    console.log('./sentences-audio-gen filename.csv --voiceId Matthew');
     console.log('Available voices: Matthew, Joanna, Amy, Brian');
     process.exit(0);
   }
@@ -112,8 +142,10 @@ async function main() {
       await writeCsv(sentences, 'prueba.csv');
     } catch(err) {
       console.log(`❌ ${err.message}`);
+      process.exit(1);
     }
      console.log(sentences[0]);
+     process.exit(0);
   }
 
 }

@@ -1,4 +1,5 @@
 Create an .env file with:
 
-- AWS_POLLY_TOKEN
+- AWS_ACCESS_KEY_ID
+- AWS_SECRET_ACCESS_KEY
 - DEEPL_TOKEN
