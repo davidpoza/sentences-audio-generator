@@ -34,7 +34,7 @@ async function translateText(text, targetLang = 'ES') {
 async function generateAudioFile(text, { folderName, filename, voiceId = DEFAULT_VOICE_ID, lang = 'es-ES' }) {
   const path = `${folderName}/${filename}.mp3`;
   if(fs.existsSync(path)) return;
-  console.log("💲Generating audio:", text, filename);
+  console.log("💲Generating audio:", text, `[${filename}]`);
 
   const client = new PollyClient({
     region: "eu-west-2",
@@ -104,7 +104,7 @@ async function processSentences(sentences = [], { forceVoiceId, folderName } = {
   for (const s of translatedSentences) {
     await generateAudioFile(s.enSentence, {
       filename: s.audioFileHash,
-      voiceId: forceVoiceId,
+      voiceId: forceVoiceId || s.voiceId,
       folderName: folderName + "/en",
       lang: "en-US",
     });
@@ -129,7 +129,7 @@ async function main() {
     process.exit(0);
   }
   if(argv.help || argv.h) {
-    console.log('./sentences-audio-gen filename.csv --voiceId Matthew');
+    console.log('./sentences-audio-gen filename.csv --force-voice-id Matthew');
     console.log('Available voices: Matthew, Joanna, Amy, Brian');
     process.exit(0);
   }
@@ -138,7 +138,7 @@ async function main() {
     try {
       sentences = await parseCsv(filename);
       console.log(`✅ It's been read ${sentences.length} sentences`);
-      sentences = await processSentences(sentences, { folderName });
+      sentences = await processSentences(sentences, { folderName, forceVoiceId: argv['force-voice-id'] });
       await writeCsv(sentences, filename);
     } catch(err) {
       console.log(`❌ ${err.message}`);
