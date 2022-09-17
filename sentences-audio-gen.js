@@ -94,42 +94,54 @@ async function writeCsv(sentences = [], filename) {
 }
 
 
-async function processSentences(sentences = [], { forceVoiceId, folderName } = {}) {
-  const translatedSentences = await Promise.all(sentences.map(async s => {
-    return {
-      enSentence: s.enSentence,
-      esSentence: s.esSentence || await translateText(s.enSentence),
-      voiceId: s.voiceId,
-      audioFileHash: md5(s.enSentence),
-    };
-  }));
+async function processSentences(
+  sentences = [],
+  { forceVoiceId, folderName, disableSynthesis, disableTranslation } = {}
+) {
+  const translatedSentences = await Promise.all(
+    sentences.map(async (s) => {
+      return {
+        enSentence: s.enSentence,
+        esSentence: s.esSentence || !disableTranslation && (await translateText(s.enSentence)),
+        voiceId: s.voiceId,
+        audioFileHash: md5(s.enSentence),
+      };
+    })
+  );
   for (const s of translatedSentences) {
-    await generateAudioFile(s.enSentence, {
-      filename: s.audioFileHash,
-      voiceId: forceVoiceId || s.voiceId,
-      folderName: folderName + "/en",
-      lang: "en-US",
-    });
-    await generateAudioFile(s.esSentence, {
-      filename: s.audioFileHash,
-      voiceId: 'Lucia',
-      folderName: folderName + "/es",
-      lang: "es-ES",
-    });
+    if (!disableSynthesis) {
+      await generateAudioFile(s.enSentence, {
+        filename: s.audioFileHash,
+        voiceId: forceVoiceId || s.voiceId,
+        folderName: folderName + "/en",
+        lang: "en-US",
+      });
+      await generateAudioFile(s.esSentence, {
+        filename: s.audioFileHash,
+        voiceId: "Lucia",
+        folderName: folderName + "/es",
+        lang: "es-ES",
+      });
+    }
   }
   return translatedSentences;
 }
 
-async function combineAudios(sentences = [], name) {
+async function combineAudios(sentences = [], name, repetitions = 1, reverse) {
   const filename = `${name}_combined.mp3`;
   if(fs.existsSync(filename)) return;
   console.log("Generating combined audio...")
   const fileList = [];
   sentences.forEach(s => {
-    fileList.push(`${name}/es/` + s.audioFileHash + '.mp3');
+    let rep = 0;
+    fileList.push((reverse ? `${name}/en/` : `${name}/es/`) + s.audioFileHash + '.mp3');
     fileList.push('resources/timer.mp3');
-    fileList.push(`${name}/en/` + s.audioFileHash + '.mp3');
-    fileList.push('resources/silence.mp3');
+    while (rep < parseInt(repetitions)) {
+      fileList.push((reverse ? `${name}/es/` : `${name}/en/`) + s.audioFileHash + '.mp3');
+      fileList.push('resources/silence.mp3');
+      rep++;
+    }
+
   });
   return new Promise(async (resolve, reject) => {
     audioconcat(fileList)
@@ -168,11 +180,19 @@ async function main() {
   if(filename) {
     try {
       sentences = await parseCsv(filename);
+      if (argv["random-order"]) {
+        sentences.sort(() => (Math.random() > .5) ? 1 : -1);
+      }
       console.log(`✅ It's been read ${sentences.length} sentences`);
-      sentences = await processSentences(sentences, { folderName, forceVoiceId: argv['force-voice-id'] });
+      sentences = await processSentences(sentences, {
+        folderName,
+        forceVoiceId: argv["force-voice-id"],
+        disableTranslation: argv["disable-translation"],
+        disableSynthesis: argv["disable-synthesis"],
+      });
       await writeCsv(sentences, filename);
       if (argv.concat) {
-        await combineAudios(sentences, folderName);
+        await combineAudios(sentences, folderName, argv["repetitions"], argv["reverse-columns"]);
       }
     } catch(err) {
       console.log(`❌ ${err.message}`);
